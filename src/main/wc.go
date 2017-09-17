@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"mapreduce"
 	"os"
+	"strings"
+	"unicode"
+	"strconv"
 )
 
 //
@@ -15,6 +18,20 @@ import (
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
 	// TODO: you have to write this function
+	/*
+	1. 将value划分为keyValue数据结构
+	2. 塞入res这个KeyValue数组中并返回
+ 	*/
+ 	var res []mapreduce.KeyValue
+	// func FieldsFunc(s string, f func(rune) bool) []string 函数原型
+	// 通过传入的func判断是否当前字符符合要求
+	values := strings.FieldsFunc(contents, func(c rune) bool {
+		return !unicode.IsLetter(c)  // 判断是否为字母
+	})
+	for _, v := range values {
+		res = append(res, mapreduce.KeyValue{v, "1"})
+	}
+	return res
 }
 
 //
@@ -24,6 +41,20 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 //
 func reduceF(key string, values []string) string {
 	// TODO: you also have to write this function
+	/*
+	1. 得到一个key-values(词频集合)
+	2. 对词频集合求总和, 最后将总和发射出去
+	ps: Atoi和Itoa, 分别用于 字符串转整数 整数转字符串
+ 	*/
+	var sum int = 0
+	for _, v := range values {
+		intV, err := strconv.Atoi(v)
+		if err != nil {
+			fmt.Printf("%v make error: %v\n", v, err)
+		}
+		sum += intV
+	}
+	return strconv.Itoa(sum)
 }
 
 // Can be run in 3 ways:
