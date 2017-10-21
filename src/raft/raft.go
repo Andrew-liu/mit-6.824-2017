@@ -197,7 +197,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	if (args.Term < rf.currentTerm) {
+	if args.Term < rf.currentTerm {
 		return
 	}
 
@@ -310,7 +310,7 @@ func (rf *Raft) BroadcastRequestVotes() {
 func (rf *Raft) BroadcastAppendEntries() {
 	var args AppendEntriesArgs
 	args.Term = rf.currentTerm
-	args.Entries = make([]LogEntry,0)
+	args.Entries = make([]LogEntry, 0)
 	args.LeaderId = rf.me
 	args.LeaderCommit = rf.commitIndex
 
@@ -387,7 +387,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastApplied = rf.log[0].LogIndex
 
 	// config
-	rf.heartbeatInterval = 60
+	rf.heartbeatInterval = 60  //heartbeat timeout is 60ms
+	// election timeout is [150ms, 300ms)
 	rf.electionTimeoutMin = 150
 	rf.electionTimeoutRange = 150
 
@@ -434,6 +435,7 @@ func (rf *Raft) LeaderLoop() {
 
 func (rf *Raft) FollowerLoop() {
 	select {
+	// 收到心跳包，重置计时器
 	case <- rf.heartBeatChan:
 	case <- time.After(time.Duration(rf.electionTimeoutMin + rand.Intn(rf.electionTimeoutRange)) * time.Millisecond):
 		rf.mu.Lock()
@@ -444,7 +446,7 @@ func (rf *Raft) FollowerLoop() {
 
 func (rf *Raft) CandidateLoop() {
 	// 发起选举
-	rf.mu.Lock()
+	rf.mu.Lock()  // 更改候选者状态
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rf.voteCount = 1
@@ -457,6 +459,7 @@ func (rf *Raft) CandidateLoop() {
 		}
 	case <- rf.heartBeatChan:
 	case <- time.After(time.Duration(rf.electionTimeoutMin + rand.Intn(rf.electionTimeoutRange)) * time.Millisecond):
+		// 超时则进入重新投票
 	}
 }
 
