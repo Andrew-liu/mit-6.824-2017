@@ -22,6 +22,7 @@ import (
 	"labrpc"
 	"time"
 	"math/rand"
+	"math"
 )
 
 // import "bytes"
@@ -109,7 +110,7 @@ func (rf *Raft) GetLastLog() LogEntry {
 }
 
 func (rf *Raft) GetPrevLog(server int) LogEntry {
-	return rf.log[rf.nextIndex[server] - 1]
+	return rf.log[rf.nextIndex[server]]
 }
 //
 // save Raft's persistent state to stable storage,
@@ -170,8 +171,8 @@ type RequestVoteReply struct {
 type AppendEntriesArgs struct {
 	Term int
 	LeaderId int
-	PreLogIndex int
-	PreLogTerm int
+	PrevLogIndex int
+	PrevLogTerm int
 	Entries []LogEntry
 	LeaderCommit int
 }
@@ -223,6 +224,50 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.role = Follower
 		rf.votedFor = args.CandidateId
 		rf.voteCount = 0
+	}
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	reply.Term = rf.currentTerm
+	reply.Success = false
+
+	// Reply false if term < currentTerm
+	if args.Term < rf.currentTerm {
+		return  // leader已过期
+	}
+
+	if args.LeaderId != rf.me {
+		// 表示收到心跳包，则重置选举超时计时器
+		rf.heartBeatChan <- true
+	}
+
+	if args.Term > rf.currentTerm {
+		rf.role = Follower
+		rf.voteCount = 0
+		rf.votedFor = -1
+		rf.currentTerm = args.Term
+		reply.Term = rf.currentTerm
+	}
+	// Reply false if log doesn't contain an entry at prevLogIndex
+	// whose term matches prevLogTerm
+	if rf.GetLastLog().LogIndex < args.PrevLogIndex || rf.log[args.PrevLogIndex].LogTerm != args.PrevLogTerm {
+		reply.Success = true
+		return
+	}
+
+	//If an existing entry conflicts with a new one (same index
+	//but different terms), delete the existing entry and all that
+	//follow it
+
+	// Append any new entries not already in the log
+
+	//If leaderCommit > commitIndex, set commitIndex =
+	//	min(leaderCommit, index of last new entry)
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = int(math.Min(float64(args.LeaderCommit), float64(rf.GetLastLog().LogIndex)))
 	}
 }
 
@@ -284,6 +329,10 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	if !ok {
+		// rpc error
+		return ok
+	}
 	return ok
 }
 
@@ -309,14 +358,16 @@ func (rf *Raft) BroadcastRequestVotes() {
 
 func (rf *Raft) BroadcastAppendEntries() {
 	var args AppendEntriesArgs
+	rf.mu.Lock()
 	args.Term = rf.currentTerm
 	args.Entries = make([]LogEntry, 0)
 	args.LeaderId = rf.me
 	args.LeaderCommit = rf.commitIndex
+	rf.mu.Unlock()
 
 	for i := range rf.peers {
-		args.PreLogIndex = rf.GetPrevLog(i).LogIndex
-		args.PreLogTerm = rf.GetPrevLog(i).LogTerm
+		args.PrevLogIndex = rf.GetPrevLog(i).LogIndex
+		args.PrevLogTerm = rf.GetPrevLog(i).LogTerm
 		go func(index int) {
 			var reply AppendEntriesReply
 			rf.sendAppendEntries(index, &args, &reply)
@@ -402,6 +453,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start
 	go rf.ServerLoop()
 
+	// commit log
+	//go rf.CommitLoop()
+
 	return rf
 }
 
@@ -429,7 +483,7 @@ func (rf *Raft) ServerLoop() {
 func (rf *Raft) LeaderLoop() {
 	// 转变为leader后应该广播心跳
 	DPrintf("LeaderLoop|%d|broadcast AppendEntries RPC", rf.me)
-	//go rf.broadcastAppendEntries()
+	go rf.BroadcastAppendEntries()
 	time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
 }
 
@@ -471,5 +525,12 @@ func (rf *Raft) BecomeLeader() {
 		// TODO: review
 		rf.nextIndex[i] = rf.GetLastLog().LogIndex
 		rf.matchIndex[i] = 0
+	}
+}
+
+func (rf *Raft) CommitLoop() {
+	DPrintf("CommitLoop|%d|start commitloop. >>>\n", rf.me)
+	for {
+		return
 	}
 }
